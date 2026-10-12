@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>老師簽收系統 (Google Drive 版)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f3f4f6;
+        }
+        #signature-pad {
+            border: 2px dashed #cbd5e1;
+            border-radius: 0.5rem;
+            cursor: crosshair;
+            background-color: white;
+            touch-action: none;
+        }
+        .toast {
+            visibility: hidden;
+            min-width: 250px;
+            margin-left: -125px;
+            background-color: #333;
+            color: #fff;
+            text-align: center;
+            border-radius: 8px;
+            padding: 16px;
+            position: fixed;
+            z-index: 1000;
+            left: 50%;
+            bottom: 30px;
+            font-size: 17px;
+            transition: visibility 0.5s, opacity 0.5s linear;
+            opacity: 0;
+        }
+        .toast.show {
+            visibility: visible;
+            opacity: 1;
+        }
+        .toast.success { background-color: #10b981; }
+        .toast.error { background-color: #ef4444; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        /* 載入中遮罩 */
+        #loading-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(255, 255, 255, 0.8);
+            z-index: 2000;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+    </style>
+</head>
+<body class="text-gray-800">
+
+    <!-- 上傳中遮罩 -->
+    <div id="loading-overlay">
+        <i class="fas fa-cloud-upload-alt text-6xl text-blue-500 mb-4 animate-bounce"></i>
+        <div class="flex items-center text-xl font-bold text-gray-700">
+            <i class="fas fa-circle-notch fa-spin mr-3 text-blue-600"></i> 資料上傳中，請稍候...
+        </div>
+        <p class="text-gray-500 mt-2">相片較大時可能需要幾十秒鐘</p>
+    </div>
+
+    <!-- 頂部導航欄 -->
+    <nav class="bg-blue-600 text-white shadow-md p-4 sticky top-0 z-50">
+        <div class="max-w-4xl mx-auto flex justify-between items-center">
+            <h1 class="text-xl font-bold"><i class="fas fa-clipboard-check mr-2"></i>老師簽收系統</h1>
+            <div class="flex items-center gap-2 md:gap-4">
+                <button id="share-btn" class="text-sm bg-white text-blue-600 hover:bg-gray-100 px-3 py-1.5 rounded-full flex items-center shadow transition-colors font-medium">
+                    <i class="fas fa-link mr-1.5"></i> <span class="hidden sm:inline">複製連結</span><span class="sm:hidden">分享</span>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="max-w-4xl mx-auto p-4 mt-6">
+        <!-- 輸入表單 -->
+        <div class="bg-white rounded-xl shadow-lg p-6">
+            <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <i class="fas fa-info-circle text-yellow-400"></i>
+                    </div>
+                    <div class="ml-3">
+                        <p class="text-sm text-yellow-700">
+                            系統已切換為 Google Drive 儲存模式。請確保在原始碼中填入您的 Google Apps Script 網頁應用程式 URL。
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <h2 class="text-2xl font-semibold mb-6 text-gray-700 border-b pb-2">新增簽收</h2>
+            
+            <form id="sign-form" class="space-y-6">
+                <!-- 老師姓名 -->
+                <div>
+                    <label for="teacher-name" class="block text-sm font-medium text-gray-700 mb-1">老師姓名 <span class="text-red-500">*</span></label>
+                    <input type="text" id="teacher-name" required placeholder="請輸入老師姓名" 
+                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-shadow">
+                </div>
+
+                <!-- 照片上傳 -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">上傳相片 (可選，支援高畫質)</label>
+                    <div class="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-lg hover:border-blue-400 transition-colors bg-gray-50 relative">
+                        <div class="space-y-1 text-center">
+                            <i class="fas fa-camera text-3xl text-gray-400 mb-3"></i>
+                            <div class="flex text-sm text-gray-600 justify-center">
+                                <label for="photo-upload" class="relative cursor-pointer bg-white rounded-md font-medium text-blue-600 hover:text-blue-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-blue-500">
+                                    <span>選擇檔案</span>
+                                    <input id="photo-upload" name="photo-upload" type="file" accept="image/*" class="sr-only">
+                                </label>
+                                <p class="pl-1">或拖曳至此</p>
+                            </div>
+                            <p class="text-xs text-gray-500">支援較大檔案，將自動轉存至 Google Drive</p>
+                        </div>
+                        <div id="photo-preview-container" class="hidden absolute inset-0 bg-white rounded-lg flex items-center justify-center p-2">
+                            <img id="photo-preview" src="" alt="預覽" class="max-h-full max-w-full rounded object-contain">
+                            <button type="button" id="remove-photo" class="absolute top-2 right-2 bg-red-500 text-white rounded-full w-8 h-8 flex items-center justify-center hover:bg-red-600 shadow-md">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 簽名板 -->
+                <div>
+                    <div class="flex justify-between items-end mb-1">
+                        <label class="block text-sm font-medium text-gray-700">簽名 <span class="text-red-500">*</span></label>
+                        <button type="button" id="clear-signature" class="text-xs text-blue-600 hover:text-blue-800 flex items-center">
+                            <i class="fas fa-eraser mr-1"></i> 清除重簽
+                        </button>
+                    </div>
+                    <div class="w-full h-48 relative">
+                        <canvas id="signature-pad" class="w-full h-full"></canvas>
+                        <div id="signature-placeholder" class="absolute inset-0 flex items-center justify-center text-gray-400 pointer-events-none">
+                            請在此處簽名
+                        </div>
+                    </div>
+                    <p id="signature-error" class="text-red-500 text-xs mt-1 hidden">請提供簽名</p>
+                </div>
+
+                <!-- 提交按鈕 -->
+                <button type="submit" id="submit-btn" disabled class="w-full bg-blue-600 text-white font-semibold py-4 px-4 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center text-lg">
+                    <span id="submit-text">提交簽收</span>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 圖片放大模態框 -->
+    <div id="image-modal" class="fixed inset-0 bg-black bg-opacity-75 z-[60] hidden flex-col items-center justify-center p-4">
+        <button id="close-modal" class="absolute top-4 right-4 text-white hover:text-gray-300 text-3xl">
+            <i class="fas fa-times"></i>
+        </button>
+        <img id="modal-image" src="" alt="放大圖片" class="max-w-full max-h-[85vh] rounded object-contain">
+    </div>
+
+    <!-- Toast 提示訊息 -->
+    <div id="toast" class="toast">訊息</div>
+
+    <script>
+        // ==========================================
+        // 請將下方的 URL 替換為您的 Google Apps Script 網頁應用程式網址
+        // ==========================================
+        const GAS_WEB_APP_URL = "您的_GAS_網頁應用程式_URL_請貼在這裡";
+        
+        const teacherNameInput = document.getElementById('teacher-name');
+        const photoUploadInput = document.getElementById('photo-upload');
+        const photoPreviewContainer = document.getElementById('photo-preview-container');
+        const photoPreview = document.getElementById('photo-preview');
+        const removePhotoBtn = document.getElementById('remove-photo');
+        const clearSignatureBtn = document.getElementById('clear-signature');
+        const signaturePadCanvas = document.getElementById('signature-pad');
+        const signaturePlaceholder = document.getElementById('signature-placeholder');
+        const signatureError = document.getElementById('signature-error');
+        const signForm = document.getElementById('sign-form');
+        const submitBtn = document.getElementById('submit-btn');
+        const submitText = document.getElementById('submit-text');
+        const shareBtn = document.getElementById('share-btn');
+        const toast = document.getElementById('toast');
+        const loadingOverlay = document.getElementById('loading-overlay');
+
+        let photoDataUrl = null;
+        let isDrawing = false;
+        let ctx = signaturePadCanvas.getContext('2d');
+        let hasSignature = false;
+
+        function resizeCanvas() {
+            const ratio = Math.max(window.devicePixelRatio || 1, 1);
+            signaturePadCanvas.width = signaturePadCanvas.offsetWidth * ratio;
+            signaturePadCanvas.height = signaturePadCanvas.offsetHeight * ratio;
+            ctx.scale(ratio, ratio);
+            ctx.strokeStyle = "#000000";
+            ctx.lineWidth = 3;
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
+            hasSignature = false;
+            updateSubmitButtonState();
+        }
+
+        window.addEventListener("resize", resizeCanvas);
+        setTimeout(resizeCanvas, 100);
+
+        function getCoordinates(event) {
+            const rect = signaturePadCanvas.getBoundingClientRect();
+            const clientX = event.touches ? event.touches[0].clientX : event.clientX;
+            const clientY = event.touches ? event.touches[0].clientY : event.clientY;
+            return { x: clientX - rect.left, y: clientY - rect.top };
+        }
+
+        function startDrawing(e) {
+            e.preventDefault();
+            isDrawing = true;
+            signaturePlaceholder.style.display = 'none';
+            const { x, y } = getCoordinates(e);
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+        }
+
+        function draw(e) {
+            if (!isDrawing) return;
+            e.preventDefault();
+            const { x, y } = getCoordinates(e);
+            ctx.lineTo(x, y);
+            ctx.stroke();
+            hasSignature = true;
+            signatureError.classList.add('hidden');
+            updateSubmitButtonState();
+        }
+
+        function stopDrawing() {
+            isDrawing = false;
+            ctx.closePath();
+        }
+
+        signaturePadCanvas.addEventListener('mousedown', startDrawing);
+        signaturePadCanvas.addEventListener('mousemove', draw);
+        signaturePadCanvas.addEventListener('mouseup', stopDrawing);
+        signaturePadCanvas.addEventListener('mouseout', stopDrawing);
+        signaturePadCanvas.addEventListener('touchstart', startDrawing, { passive: false });
+        signaturePadCanvas.addEventListener('touchmove', draw, { passive: false });
+        signaturePadCanvas.addEventListener('touchend', stopDrawing);
+
+        clearSignatureBtn.addEventListener('click', () => {
+            const canvasWidth = signaturePadCanvas.width / (window.devicePixelRatio || 1);
+            const canvasHeight = signaturePadCanvas.height / (window.devicePixelRatio || 1);
+            ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+            hasSignature = false;
+            signaturePlaceholder.style.display = 'flex';
+            updateSubmitButtonState();
+        });
+
+        // FileReader 讀取相片轉換為 Base64 (移除大小限制)
+        photoUploadInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                photoDataUrl = event.target.result;
+                photoPreview.src = photoDataUrl;
+                photoPreviewContainer.classList.remove('hidden');
+            };
+            reader.readAsDataURL(file);
+        });
+
+        removePhotoBtn.addEventListener('click', () => {
+            photoDataUrl = null;
+            photoUploadInput.value = '';
+            photoPreviewContainer.classList.add('hidden');
+            photoPreview.src = '';
+        });
+
+        function updateSubmitButtonState() {
+            const name = teacherNameInput.value.trim();
+            if (name && hasSignature) {
+                submitBtn.disabled = false;
+            } else {
+                submitBtn.disabled = true;
+            }
+        }
+
+        teacherNameInput.addEventListener('input', updateSubmitButtonState);
+
+        // 提交表單至 Google Apps Script
+        signForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            if (GAS_WEB_APP_URL === "您的_GAS_網頁應用程式_URL_請貼在這裡") {
+                showToast('請先在程式碼中設定 Google Apps Script URL', 'error');
+                return;
+            }
+
+            if (!hasSignature) {
+                signatureError.classList.remove('hidden');
+                return;
+            }
+
+            const teacherName = teacherNameInput.value.trim();
+            if (!teacherName) return;
+
+            const signatureDataUrl = signaturePadCanvas.toDataURL('image/png');
+
+            // 準備上傳資料
+            const payload = {
+                teacherName: teacherName,
+                signatureBase64: signatureDataUrl.split(',')[1], // 移除 data:image/png;base64, 前綴
+                photoBase64: photoDataUrl ? photoDataUrl.split(',')[1] : null,
+                photoMimeType: photoDataUrl ? photoDataUrl.split(';')[0].split(':')[1] : null,
+                timestamp: new Date().toISOString()
+            };
+
+            // 顯示載入動畫
+            submitBtn.disabled = true;
+            loadingOverlay.style.display = 'flex';
+
+            try {
+                // 使用 fetch 發送 POST 請求
+                const response = await fetch(GAS_WEB_APP_URL, {
+                    method: 'POST',
+                    body: JSON.stringify(payload)
+                    // 注意：Google Apps Script 可能需要設定 mode: 'no-cors'，
+                    // 但使用 no-cors 無法讀取回傳值。一般建議在 GAS 端處理 CORS。
+                });
+
+                // 假設上傳成功
+                showToast('簽收成功！資料已上傳至 Google Drive。', 'success');
+                resetForm();
+
+            } catch (error) {
+                console.error("提交失敗:", error);
+                showToast('提交失敗，請檢查網路或 GAS 設定', 'error');
+            } finally {
+                loadingOverlay.style.display = 'none';
+                updateSubmitButtonState();
+            }
+        });
+
+        function resetForm() {
+            teacherNameInput.value = '';
+            removePhotoBtn.click();
+            clearSignatureBtn.click();
+        }
+
+        function showToast(message, type = 'success') {
+            toast.textContent = message;
+            toast.className = `toast show ${type}`;
+            setTimeout(() => {
+                toast.className = toast.className.replace('show', '');
+            }, 5000);
+        }
+
+        shareBtn.addEventListener('click', () => {
+            const tempInput = document.createElement('input');
+            tempInput.value = window.location.href;
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempInput);
+            showToast('已複製公開連結，可直接貼上分享！', 'success');
+        });
+    </script>
+</body>
+</html>
